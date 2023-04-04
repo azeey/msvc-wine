@@ -1,0 +1,55 @@
+FROM ubuntu:22.04
+
+
+RUN dpkg --add-architecture i386 && \
+    apt-get update && \
+    apt-get install -y wget p7zip-full vim xvfb ntfs-3g python3 msitools python3-simplejson \
+                       python3-six ca-certificates sudo && \
+    apt-get clean -y && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN mkdir -pm755 /etc/apt/keyrings && \
+    wget -O /etc/apt/keyrings/winehq-archive.key https://dl.winehq.org/wine-builds/winehq.key && \
+    wget -NP /etc/apt/sources.list.d/ https://dl.winehq.org/wine-builds/ubuntu/dists/jammy/winehq-jammy.sources && \
+    apt-get update && \
+    apt-get install -y --install-recommends winehq-stable && \
+    apt-get clean -y && \
+    rm -rf /var/lib/apt/lists/*
+
+
+WORKDIR /opt/msvc
+
+COPY lowercase fixinclude install.sh vsdownload.py ./
+COPY wrappers/* ./wrappers/
+
+RUN PYTHONUNBUFFERED=1 python3 vsdownload.py --accept-license --dest /opt/msvc && \
+    ./install.sh /opt/msvc && \
+    rm lowercase fixinclude install.sh vsdownload.py && \
+    rm -rf wrappers
+
+# Add a user with the same user_id as the user outside the container
+# Requires a docker build argument `user_id`
+ARG user_id=1000
+ENV USERNAME developer
+RUN useradd -U --uid ${user_id} -m -s /bin/bash $USERNAME \
+ && echo "$USERNAME:$USERNAME" | chpasswd \
+ && adduser $USERNAME sudo \
+ && echo "$USERNAME ALL=NOPASSWD: ALL" >> /etc/sudoers.d/$USERNAME
+
+# Commands below run as the user
+RUN chown $USERNAME:$USERNAME /opt
+WORKDIR /home/$USERNAME
+USER $USERNAME
+
+
+COPY msvc-colcon.sh ./
+COPY install_wine.sh ./
+
+RUN echo 'source $HOME/msvc-colcon.sh' >> /home/$USERNAME/.bashrc
+RUN echo 'source $HOME/msvc-colcon.sh' >> /home/$USERNAME/.zshrc
+
+
+RUN apt-get update && \
+    apt-get install -y winbind && \
+    apt-get clean -y && \
+    rm -rf /var/lib/apt/lists/*
